@@ -59,12 +59,9 @@
   <div class="loading-text" id="statusText" style="display:none;">Đang Tải Dữ Liệu...</div>
 </div>
 
-<!-- Hidden preload iframe -->
 <iframe id="preloadFrame" allow="autoplay; fullscreen; picture-in-picture"></iframe>
-<!-- Main iframe -->
 <iframe id="proxyFrame" allow="autoplay; fullscreen; picture-in-picture"></iframe>
 
-<script src="reload-helper.js"></script>
 <script>
 const TARGET_URL = "https://uproxy.online/ultraviolet/hvtrs8%2F-nmw%2Cge%2Fcprs-cnuqtgr%2Cilc-9355%2Falwsvep.jtol";
 const startBtn = document.getElementById('startBtn');
@@ -79,7 +76,6 @@ let wakeLock=null; let startTime=Date.now(); let audioContext=null;
 let preloadAttempts = 0;
 let mainLoadAttempts = 0;
 
-// Kiểm tra trạng thái từ sessionStorage
 const isReloaded = sessionStorage.getItem('ugphone_reloaded') === 'true';
 const isPreloaded = sessionStorage.getItem('ugphone_preloaded') === 'true';
 
@@ -111,282 +107,77 @@ function startSilentAudio(){
     g.gain.value=0.0001;
     o.frequency.value=20;
     o.start(0);
-    setInterval(()=>{
-      if(audioContext.state==='suspended'){
-        audioContext.resume();
-      }
-    },3000);
+    setInterval(()=>{ if(audioContext.state==='suspended'){ audioContext.resume(); } },3000);
   }catch(err){}
 }
 
-function preventPageFreeze(){
-  setInterval(()=>{
-    Math.random()*Date.now();
-  },10000);
-}
+function preventPageFreeze(){ setInterval(()=>{ Math.random()*Date.now(); },10000); }
+function updateUptime(){ setInterval(()=>{ const e=Math.floor((Date.now()-startTime)/1000); const m=Math.floor(e/60); const s=e%60; uptimeEl.textContent=`${m}:${s.toString().padStart(2,'0')}`; },1000); }
 
-function updateUptime(){
-  setInterval(()=>{
-    const e=Math.floor((Date.now()-startTime)/1000);
-    const m=Math.floor(e/60);
-    const s=e%60;
-    uptimeEl.textContent=`${m}:${s.toString().padStart(2,'0')}`;
-  },1000);
-}
-
-// BƯỚC 1: Preload trong hidden iframe để "đánh thức" proxy
-function preloadURL() {
-  return new Promise((resolve, reject) => {
-    console.log('[UgPhone] Preloading URL...');
-    statusText.textContent = 'Đang khởi động...';
-    
-    let preloadTimeout;
-    let checkInterval;
-    
-    const cleanup = () => {
-      clearTimeout(preloadTimeout);
-      clearInterval(checkInterval);
-      preloadFrame.removeEventListener('load', onPreload);
-    };
-    
-    const onPreload = () => {
-      console.log('[UgPhone] Preload completed');
-      cleanup();
-      sessionStorage.setItem('ugphone_preloaded', 'true');
-      resolve();
-    };
-    
-    // Timeout sau 8 giây
-    preloadTimeout = setTimeout(() => {
-      console.log('[UgPhone] Preload timeout, continuing anyway');
-      cleanup();
-      sessionStorage.setItem('ugphone_preloaded', 'true');
-      resolve();
-    }, 8000);
-    
-    // Kiểm tra 404 mỗi giây
-    let checkCount = 0;
-    checkInterval = setInterval(() => {
-      checkCount++;
-      try {
-        const doc = preloadFrame.contentDocument || preloadFrame.contentWindow.document;
-        if (doc && doc.body) {
-          const text = doc.body.innerText.toLowerCase();
-          if (text.includes('404') || text.includes('does not exist')) {
-            console.warn('[UgPhone] 404 in preload, will retry main load');
-          } else if (text.length > 100) {
-            // Có nội dung thực sự
-            console.log('[UgPhone] Valid content in preload');
-            cleanup();
-            sessionStorage.setItem('ugphone_preloaded', 'true');
-            resolve();
-          }
-        }
-      } catch (e) {
-        // Cross-origin hoặc chưa load xong
-      }
-      
-      if (checkCount >= 7) {
-        cleanup();
-        resolve();
-      }
-    }, 1000);
-    
-    preloadFrame.addEventListener('load', onPreload, { once: true });
+async function preloadURL() {
+  return new Promise((resolve) => {
     preloadFrame.src = TARGET_URL;
+    setTimeout(resolve, 5000);
   });
 }
 
-// BƯỚC 2: Load vào iframe chính với retry
-function loadMainIframe(attempt = 0) {
-  const maxAttempts = 5;
-  mainLoadAttempts = attempt;
-  
-  console.log(`[UgPhone] Loading main iframe (attempt ${attempt + 1}/${maxAttempts})`);
-  statusText.textContent = attempt > 0 ? `Đang thử lại... (${attempt + 1}/${maxAttempts})` : 'Đang Tải Dữ Liệu...';
-  
-  return new Promise((resolve, reject) => {
-    let loadTimeout;
-    let checkInterval;
-    let hasContent = false;
-    
-    const cleanup = () => {
-      clearTimeout(loadTimeout);
-      clearInterval(checkInterval);
-      frame.removeEventListener('load', onLoad);
-    };
-    
-    const retryLoad = () => {
-      cleanup();
-      if (attempt < maxAttempts - 1) {
-        console.log('[UgPhone] Retrying after 2 seconds...');
-        // Clear iframe trước khi retry
-        frame.src = 'about:blank';
-        setTimeout(() => {
-          loadMainIframe(attempt + 1).then(resolve).catch(reject);
-        }, 2000);
-      } else {
-        statusText.textContent = 'Lỗi tải trang. Đang thử lại...';
-        // Retry vô hạn cho đến khi thành công
-        setTimeout(() => {
-          loadMainIframe(0).then(resolve).catch(reject);
-        }, 3000);
-      }
-    };
-    
-    const onLoad = () => {
-      console.log('[UgPhone] Main iframe load event fired');
-      // Đợi 3 giây để kiểm tra nội dung
-      setTimeout(() => {
-        if (hasContent) {
-          cleanup();
-          sessionStorage.setItem('ugphone_loaded', 'true');
-          sessionStorage.setItem('ugphone_load_time', Date.now().toString());
-          console.log('[UgPhone] ✅ Main iframe loaded successfully!');
-          statusText.textContent = 'Tải thành công!';
-          resolve();
-        }
-      }, 3000);
-    };
-    
-    // Timeout 15 giây
-    loadTimeout = setTimeout(() => {
-      console.warn('[UgPhone] Main iframe load timeout');
-      retryLoad();
-    }, 15000);
-    
-    // Kiểm tra nội dung mỗi giây
-    let checkCount = 0;
-    checkInterval = setInterval(() => {
-      checkCount++;
-      try {
-        const doc = frame.contentDocument || frame.contentWindow.document;
-        if (doc && doc.body) {
-          const text = doc.body.innerText.toLowerCase();
-          
-          if (text.includes('404') || text.includes('does not exist') || text.includes('not found')) {
-            console.warn('[UgPhone] ❌ 404 Error detected in main iframe');
-            retryLoad();
-            return;
-          }
-          
-          if (text.length > 100 || doc.body.children.length > 5) {
-            hasContent = true;
-            console.log('[UgPhone] Valid content detected');
-          }
-        }
-      } catch (e) {
-        // Cross-origin - giả sử OK
-        if (checkCount > 5) {
-          hasContent = true;
-          console.log('[UgPhone] Cross-origin, assuming valid');
-        }
-      }
-    }, 1000);
-    
-    frame.addEventListener('load', onLoad, { once: true });
-    
-    // Clear và load
-    if (attempt > 0) {
-      frame.src = 'about:blank';
-      setTimeout(() => {
-        frame.src = TARGET_URL;
-      }, 500);
-    } else {
-      frame.src = TARGET_URL;
-    }
-  });
+async function loadMainIframe(attempt = 0) {
+  frame.src = TARGET_URL;
 }
 
 function hideOverlay() {
   overlay.style.opacity='0';
-  setTimeout(()=>{
-    overlay.style.display='none';
-    statusBar.style.display='flex';
-  }, 500);
+  setTimeout(()=>{ overlay.style.display='none'; statusBar.style.display='flex'; },500);
 }
 
-// Khởi tạo khi trang load
 window.addEventListener('DOMContentLoaded', async ()=>{
-  // Khởi động các service
-  startSilentAudio(); 
-  preventPageFreeze(); 
-  updateUptime();
-  requestWakeLock();
+  startSilentAudio(); preventPageFreeze(); updateUptime(); requestWakeLock();
 
   if(isReloaded){
-    // Sau khi bấm "Bắt Đầu"
-    startBtn.style.display='none';
-    statusText.style.display='block';
-    
-    try {
-      // Bước 1: Preload (nếu chưa)
-      if (!isPreloaded) {
-        await preloadURL();
-        await new Promise(r => setTimeout(r, 1000)); // Đợi thêm 1 giây
-      }
-      
-      // Bước 2: Load main iframe
-      await loadMainIframe();
-      
-      // Ẩn overlay sau khi load xong
-      setTimeout(hideOverlay, 2000);
-    } catch (err) {
-      console.error('[UgPhone] Load error:', err);
-      statusText.textContent = 'Đang thử lại...';
-      setTimeout(() => loadMainIframe(), 2000);
-    }
-    
-    // Xóa flag
-    setTimeout(() => {
-      sessionStorage.removeItem('ugphone_reloaded');
-    }, 10000);
+    startBtn.style.display='none'; statusText.style.display='block';
+    await preloadURL(); await loadMainIframe(); setTimeout(hideOverlay,3000);
+    sessionStorage.removeItem('ugphone_reloaded');
   } else {
-    // Lần đầu vào
-    try {
-      // Bước 1: Preload
-      await preloadURL();
-      await new Promise(r => setTimeout(r, 1000));
-      
-      // Bước 2: Load main iframe  
-      await loadMainIframe();
-      
-      // Ẩn overlay sau 5 giây
-      setTimeout(hideOverlay, 5000);
-    } catch (err) {
-      console.error('[UgPhone] Initial load error:', err);
-    }
+    await preloadURL(); await loadMainIframe(); setTimeout(hideOverlay,4000);
   }
 });
 
-// Xử lý khi bấm nút "Bắt Đầu"
 startBtn.addEventListener('click',(e)=>{
   e.preventDefault();
-  
-  // Lưu trạng thái
-  sessionStorage.setItem('ugphone_reloaded', 'true');
-  sessionStorage.setItem('ugphone_reload_time', Date.now().toString());
-  
-  // Hiển thị loading
+  sessionStorage.setItem('ugphone_reloaded','true');
   startBtn.style.display='none';
   statusText.style.display='block';
-  
-  // Reload trang sau 500ms
-  setTimeout(()=>{
-    window.location.reload();
-  }, 500);
+  setTimeout(()=>{ window.location.reload(); },500);
 });
 
-// Cleanup
-window.addEventListener('beforeunload', () => {
-  if (wakeLock) wakeLock.release();
-});
+window.addEventListener('beforeunload',()=>{ if(wakeLock) wakeLock.release(); });
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && !wakeLock){ requestWakeLock(); } });
 
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && !wakeLock) {
-    requestWakeLock();
-  }
-});
+// === ✅ Tự động kiểm tra nội dung iframe có lỗi 404, not found, error,... ===
+function autoCheckIframe() {
+  setInterval(() => {
+    try {
+      const doc = frame.contentDocument || frame.contentWindow.document;
+      if (doc && doc.body) {
+        const text = (doc.body.innerText || "").toLowerCase();
+        if (
+          text.includes("404") ||
+          text.includes("not found") ||
+          text.includes("error") ||
+          text.includes("does not exist") ||
+          text.includes("bad gateway")
+        ) {
+          console.warn("[UgPhone] ⚠️ iframe lỗi 404/not found — reload iframe");
+          frame.src = "about:blank";
+          setTimeout(() => (frame.src = TARGET_URL), 1500);
+        }
+      }
+    } catch (e) {
+      // Cross-origin, bỏ qua
+    }
+  }, 15000);
+}
+autoCheckIframe();
 </script>
 </body>
 </html>
