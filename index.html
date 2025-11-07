@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>UgPhone MOD</title>
+<link rel="icon" type="image/x-icon" href="ugphonemod.ico">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height:100%; width:100%; margin:0; padding:0; font-family:'Segoe UI',sans-serif; overflow:hidden; background:#0a0a14; position:fixed; }
+  #overlay {
+    position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    backdrop-filter:blur(20px) brightness(0.85);
+    background:linear-gradient(135deg,rgba(15,10,30,0.95),rgba(20,15,35,0.92));
+    border:1px solid rgba(100,80,150,0.12); z-index:10; transition:opacity 0.5s ease;
+  }
+  .logo { width:120px; height:120px; background:url('ugphonemod.ico') no-repeat center/contain; margin-bottom:50px; animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{transform:scale(1);filter:drop-shadow(0 0 10px #b300ff);} 50%{transform:scale(1.1);filter:drop-shadow(0 0 25px #ff007f);} }
+  .start-btn {
+    padding:16px 48px; border:none; border-radius:18px; color:white; font-size:26px; cursor:pointer;
+    background:linear-gradient(90deg,#6a00ff,#b300ff,#ff0040); background-size:200% 200%;
+    animation:gradientShift 4s ease infinite; box-shadow:0 0 20px rgba(179,0,255,0.6);
+    transition:transform 0.3s; text-transform:capitalize; touch-action:manipulation;
+  }
+  .start-btn:active{transform:scale(0.95);}
+  .start-btn:hover{transform:scale(1.08);box-shadow:0 0 30px rgba(255,0,128,0.8);}
+  @keyframes gradientShift{0%{background-position:0% 50%;}50%{background-position:100% 50%;}100%{background-position:0% 50%;}}
+  .loading-text{font-size:24px;margin-top:35px;margin-left:15px;color:#b300ff;font-weight:600;animation:fadeIn 1.5s forwards;text-align:center;letter-spacing:0.5px;}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(15px);}to{opacity:1;transform:translateY(0);}}
+  .status-bar{position:fixed;bottom:0;left:0;right:0;background:rgba(10,10,20,0.95);padding:8px 15px;display:none;z-index:100;border-top:1px solid rgba(179,0,255,0.3);backdrop-filter:blur(10px);flex-direction:row;justify-content:space-between;align-items:center;flex-wrap:nowrap;}
+  .status-item{display:inline-flex;align-items:center;color:#b300ff;font-size:11px;white-space:nowrap;margin:0 8px;}
+  .status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#00ff00;margin-right:5px;animation:blink 2s infinite;flex-shrink:0;}
+  @keyframes blink{0%,100%{opacity:1;}50%{opacity:0.3;}}
+  iframe{width:100%;height:calc(100% - 35px);border:none;display:block;position:fixed;top:0;left:0;}
+  #preloadFrame{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;top:-9999px;}
+  @media (max-width:768px){
+    .logo{width:100px;height:100px;margin-bottom:40px;}
+    .start-btn{padding:14px 40px;font-size:22px;}
+    .loading-text{font-size:20px;margin-top:30px;}
+    .status-bar{padding:6px 10px;}
+    .status-item{font-size:10px;margin:0 5px;}
+    .status-dot{width:6px;height:6px;}
+    iframe{height:calc(100% - 30px);}
+  }
+</style>
+</head>
+<body>
+<div class="status-bar" id="statusBar">
+  <span class="status-item"><span class="status-dot"></span>Active</span>
+  <span class="status-item" id="uptime">0:00</span>
+  <span class="status-item" id="wakeLockStatus">🔒❌</span>
+</div>
+<div id="overlay">
+  <div class="logo"></div>
+  <button id="startBtn" class="start-btn">Bắt Đầu</button>
+  <div class="loading-text" id="statusText" style="display:none;">Đang Tải Dữ Liệu...</div>
+</div>
+
+<!-- Hidden preload iframe -->
+<iframe id="preloadFrame" allow="autoplay; fullscreen; picture-in-picture"></iframe>
+<!-- Main iframe -->
+<iframe id="proxyFrame" allow="autoplay; fullscreen; picture-in-picture"></iframe>
+
+<script src="reload-helper.js"></script>
+<script>
+const TARGET_URL = "https://uproxy.online/ultraviolet/hvtrs8%2F-nmw%2Cge%2Fcprs-cnuqtgr%2Cilc-9355%2Falwsvep.jtol";
+const startBtn = document.getElementById('startBtn');
+const overlay = document.getElementById('overlay');
+const frame = document.getElementById('proxyFrame');
+const preloadFrame = document.getElementById('preloadFrame');
+const statusText = document.getElementById('statusText');
+const statusBar = document.getElementById('statusBar');
+const uptimeEl = document.getElementById('uptime');
+const wakeLockStatusEl = document.getElementById('wakeLockStatus');
+let wakeLock=null; let startTime=Date.now(); let audioContext=null;
+let preloadAttempts = 0;
+let mainLoadAttempts = 0;
+
+// Kiểm tra trạng thái từ sessionStorage
+const isReloaded = sessionStorage.getItem('ugphone_reloaded') === 'true';
+const isPreloaded = sessionStorage.getItem('ugphone_preloaded') === 'true';
+
+async function requestWakeLock(){
+  try{
+    if('wakeLock'in navigator){
+      wakeLock=await navigator.wakeLock.request('screen');
+      wakeLockStatusEl.textContent='🔒✅';
+      wakeLockStatusEl.style.color='#00ff00';
+      wakeLock.addEventListener('release',()=>{
+        wakeLockStatusEl.textContent='🔒❌';
+        wakeLockStatusEl.style.color='#ff0000';
+      });
+    }else{
+      wakeLockStatusEl.textContent='🔒N/A';
+    }
+  }catch(err){
+    wakeLockStatusEl.textContent='🔒❌';
+  }
+}
+
+function startSilentAudio(){
+  try{
+    audioContext=new(window.AudioContext||window.webkitAudioContext)();
+    const o=audioContext.createOscillator();
+    const g=audioContext.createGain();
+    o.connect(g);
+    g.connect(audioContext.destination);
+    g.gain.value=0.0001;
+    o.frequency.value=20;
+    o.start(0);
+    setInterval(()=>{
+      if(audioContext.state==='suspended'){
+        audioContext.resume();
+      }
+    },3000);
+  }catch(err){}
+}
+
+function preventPageFreeze(){
+  setInterval(()=>{
+    Math.random()*Date.now();
+  },10000);
+}
+
+function updateUptime(){
+  setInterval(()=>{
+    const e=Math.floor((Date.now()-startTime)/1000);
+    const m=Math.floor(e/60);
+    const s=e%60;
+    uptimeEl.textContent=`${m}:${s.toString().padStart(2,'0')}`;
+  },1000);
+}
+
+// BƯỚC 1: Preload trong hidden iframe để "đánh thức" proxy
+function preloadURL() {
+  return new Promise((resolve, reject) => {
+    console.log('[UgPhone] Preloading URL...');
+    statusText.textContent = 'Đang khởi động...';
+    
+    let preloadTimeout;
+    let checkInterval;
+    
+    const cleanup = () => {
+      clearTimeout(preloadTimeout);
+      clearInterval(checkInterval);
+      preloadFrame.removeEventListener('load', onPreload);
+    };
+    
+    const onPreload = () => {
+      console.log('[UgPhone] Preload completed');
+      cleanup();
+      sessionStorage.setItem('ugphone_preloaded', 'true');
+      resolve();
+    };
+    
+    // Timeout sau 8 giây
+    preloadTimeout = setTimeout(() => {
+      console.log('[UgPhone] Preload timeout, continuing anyway');
+      cleanup();
+      sessionStorage.setItem('ugphone_preloaded', 'true');
+      resolve();
+    }, 8000);
+    
+    // Kiểm tra 404 mỗi giây
+    let checkCount = 0;
+    checkInterval = setInterval(() => {
+      checkCount++;
+      try {
+        const doc = preloadFrame.contentDocument || preloadFrame.contentWindow.document;
+        if (doc && doc.body) {
+          const text = doc.body.innerText.toLowerCase();
+          if (text.includes('404') || text.includes('does not exist')) {
+            console.warn('[UgPhone] 404 in preload, will retry main load');
+          } else if (text.length > 100) {
+            // Có nội dung thực sự
+            console.log('[UgPhone] Valid content in preload');
+            cleanup();
+            sessionStorage.setItem('ugphone_preloaded', 'true');
+            resolve();
+          }
+        }
+      } catch (e) {
+        // Cross-origin hoặc chưa load xong
+      }
+      
+      if (checkCount >= 7) {
+        cleanup();
+        resolve();
+      }
+    }, 1000);
+    
+    preloadFrame.addEventListener('load', onPreload, { once: true });
+    preloadFrame.src = TARGET_URL;
+  });
+}
+
+// BƯỚC 2: Load vào iframe chính với retry
+function loadMainIframe(attempt = 0) {
+  const maxAttempts = 5;
+  mainLoadAttempts = attempt;
+  
+  console.log(`[UgPhone] Loading main iframe (attempt ${attempt + 1}/${maxAttempts})`);
+  statusText.textContent = attempt > 0 ? `Đang thử lại... (${attempt + 1}/${maxAttempts})` : 'Đang Tải Dữ Liệu...';
+  
+  return new Promise((resolve, reject) => {
+    let loadTimeout;
+    let checkInterval;
+    let hasContent = false;
+    
+    const cleanup = () => {
+      clearTimeout(loadTimeout);
+      clearInterval(checkInterval);
+      frame.removeEventListener('load', onLoad);
+    };
+    
+    const retryLoad = () => {
+      cleanup();
+      if (attempt < maxAttempts - 1) {
+        console.log('[UgPhone] Retrying after 2 seconds...');
+        // Clear iframe trước khi retry
+        frame.src = 'about:blank';
+        setTimeout(() => {
+          loadMainIframe(attempt + 1).then(resolve).catch(reject);
+        }, 2000);
+      } else {
+        statusText.textContent = 'Lỗi tải trang. Đang thử lại...';
+        // Retry vô hạn cho đến khi thành công
+        setTimeout(() => {
+          loadMainIframe(0).then(resolve).catch(reject);
+        }, 3000);
+      }
+    };
+    
+    const onLoad = () => {
+      console.log('[UgPhone] Main iframe load event fired');
+      // Đợi 3 giây để kiểm tra nội dung
+      setTimeout(() => {
+        if (hasContent) {
+          cleanup();
+          sessionStorage.setItem('ugphone_loaded', 'true');
+          sessionStorage.setItem('ugphone_load_time', Date.now().toString());
+          console.log('[UgPhone] ✅ Main iframe loaded successfully!');
+          statusText.textContent = 'Tải thành công!';
+          resolve();
+        }
+      }, 3000);
+    };
+    
+    // Timeout 15 giây
+    loadTimeout = setTimeout(() => {
+      console.warn('[UgPhone] Main iframe load timeout');
+      retryLoad();
+    }, 15000);
+    
+    // Kiểm tra nội dung mỗi giây
+    let checkCount = 0;
+    checkInterval = setInterval(() => {
+      checkCount++;
+      try {
+        const doc = frame.contentDocument || frame.contentWindow.document;
+        if (doc && doc.body) {
+          const text = doc.body.innerText.toLowerCase();
+          
+          if (text.includes('404') || text.includes('does not exist') || text.includes('not found')) {
+            console.warn('[UgPhone] ❌ 404 Error detected in main iframe');
+            retryLoad();
+            return;
+          }
+          
+          if (text.length > 100 || doc.body.children.length > 5) {
+            hasContent = true;
+            console.log('[UgPhone] Valid content detected');
+          }
+        }
+      } catch (e) {
+        // Cross-origin - giả sử OK
+        if (checkCount > 5) {
+          hasContent = true;
+          console.log('[UgPhone] Cross-origin, assuming valid');
+        }
+      }
+    }, 1000);
+    
+    frame.addEventListener('load', onLoad, { once: true });
+    
+    // Clear và load
+    if (attempt > 0) {
+      frame.src = 'about:blank';
+      setTimeout(() => {
+        frame.src = TARGET_URL;
+      }, 500);
+    } else {
+      frame.src = TARGET_URL;
+    }
+  });
+}
+
+function hideOverlay() {
+  overlay.style.opacity='0';
+  setTimeout(()=>{
+    overlay.style.display='none';
+    statusBar.style.display='flex';
+  }, 500);
+}
+
+// Khởi tạo khi trang load
+window.addEventListener('DOMContentLoaded', async ()=>{
+  // Khởi động các service
+  startSilentAudio(); 
+  preventPageFreeze(); 
+  updateUptime();
+  requestWakeLock();
+
+  if(isReloaded){
+    // Sau khi bấm "Bắt Đầu"
+    startBtn.style.display='none';
+    statusText.style.display='block';
+    
+    try {
+      // Bước 1: Preload (nếu chưa)
+      if (!isPreloaded) {
+        await preloadURL();
+        await new Promise(r => setTimeout(r, 1000)); // Đợi thêm 1 giây
+      }
+      
+      // Bước 2: Load main iframe
+      await loadMainIframe();
+      
+      // Ẩn overlay sau khi load xong
+      setTimeout(hideOverlay, 2000);
+    } catch (err) {
+      console.error('[UgPhone] Load error:', err);
+      statusText.textContent = 'Đang thử lại...';
+      setTimeout(() => loadMainIframe(), 2000);
+    }
+    
+    // Xóa flag
+    setTimeout(() => {
+      sessionStorage.removeItem('ugphone_reloaded');
+    }, 10000);
+  } else {
+    // Lần đầu vào
+    try {
+      // Bước 1: Preload
+      await preloadURL();
+      await new Promise(r => setTimeout(r, 1000));
+      
+      // Bước 2: Load main iframe  
+      await loadMainIframe();
+      
+      // Ẩn overlay sau 5 giây
+      setTimeout(hideOverlay, 5000);
+    } catch (err) {
+      console.error('[UgPhone] Initial load error:', err);
+    }
+  }
+});
+
+// Xử lý khi bấm nút "Bắt Đầu"
+startBtn.addEventListener('click',(e)=>{
+  e.preventDefault();
+  
+  // Lưu trạng thái
+  sessionStorage.setItem('ugphone_reloaded', 'true');
+  sessionStorage.setItem('ugphone_reload_time', Date.now().toString());
+  
+  // Hiển thị loading
+  startBtn.style.display='none';
+  statusText.style.display='block';
+  
+  // Reload trang sau 500ms
+  setTimeout(()=>{
+    window.location.reload();
+  }, 500);
+});
+
+// Cleanup
+window.addEventListener('beforeunload', () => {
+  if (wakeLock) wakeLock.release();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !wakeLock) {
+    requestWakeLock();
+  }
+});
+</script>
+</body>
+</html>
